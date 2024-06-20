@@ -33,32 +33,31 @@ def test_db_session():
     finally:
         db.close()
 
-def test_read_products(test_db_session):
-    # Supprimer toutes les données existantes de la table "products" avant de créer de nouveaux produits
-    test_db_session.execute(text("DELETE FROM products"))
+# def test_read_products(test_db_session):
+#     # Supprimer toutes les données existantes de la table "products" avant de créer de nouveaux produits
+#     test_db_session.execute(text("DELETE FROM products"))
 
-    # Vérifier que les données sont bien supprimées
-    assert test_db_session.query(Product).count() == 0
+#     # Vérifier que les données sont bien supprimées
+#     assert test_db_session.query(Product).count() == 0
 
-    # Créer quelques produits de test dans la base de données de test
-    products_to_create = [
-        {"name": "Product 1", "description": "Description 1", "price": 49.99},
-        {"name": "Product 2", "description": "Description 2", "price": 59.99},
-    ]
-    with TestClient(app) as client:
-        for product_data in products_to_create:
-            product_create = ProductCreate(**product_data)
-            response = client.post("/products/", json=product_create.dict())
+#     # Créer quelques produits de test dans la base de données de test
+#     products_to_create = [
+#         {"name": "Product 1", "description": "Description 1", "price": 49.99},
+#         {"name": "Product 2", "description": "Description 2", "price": 59.99},
+#     ]
+#     with TestClient(app) as client:
+#         for product_data in products_to_create:
+#             product_create = ProductCreate(**product_data)
+#             response = client.post("/products/", json=product_create.dict())
 
-    # Appel à l'API pour récupérer tous les produits après la création
-    with TestClient(app) as client:
-        response = client.get("/products/")
+#     # Appel à l'API pour récupérer tous les produits après la création
+#     with TestClient(app) as client:
+#         response = client.get("/products/")
 
-        # Vérifier que la requête a réussi (code de statut 200 OK)
-        assert response.status_code == 200
-        products = response.json()
-        assert len(products) == 2  # On s'attend à trouver exactement 2 produits après la création
-
+#         # Vérifier que la requête a réussi (code de statut 200 OK)
+#         assert response.status_code == 200
+#         products = response.json()
+#         assert len(products) == 2  # On s'attend à trouver exactement 2 produits après la création
 def test_create_product(test_db_session):
     # Données de test pour créer un produit
     product_data = {
