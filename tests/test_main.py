@@ -1,130 +1,129 @@
-# test_main.py
 import pytest
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
-from main import app, Base, Product  # Assurez-vous d'importer Product depuis main
-from pydantic import BaseModel
+from main import app, get_db, create_access_token
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from main import Base, Product, User, SessionLocal, SQLALCHEMY_DATABASE_URL
 
-# Définition de l'URL de la base de données de test SQLite
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test_product.db"
+# Override database to use a SQLite in-memory database for testing
+SQLALCHEMY_TEST_DATABASE_URL = "sqlite:///./test.db"
+engine = create_engine(SQLALCHEMY_TEST_DATABASE_URL)
 
-# Configuration de la base de données de test
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Création des tables de la base de données de test
 Base.metadata.create_all(bind=engine)
 
-# Modèle Pydantic pour la création de produit
-class ProductCreate(BaseModel):
-    name: str
-    description: str
-    price: float
-
-@pytest.fixture(scope="function")
-def test_db_session():
-    """
-    Fixture pour créer une session de base de données propre pour chaque fonction de test.
-    """
+# Function to override get_db to use TestingSessionLocal
+def override_get_db():
     db = TestingSessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-# def test_read_products(test_db_session):
-#     # Supprimer toutes les données existantes de la table "products" avant de créer de nouveaux produits
-#     test_db_session.execute(text("DELETE FROM products"))
+# Dependency override to use testing session
+app.dependency_overrides[get_db] = override_get_db
 
-#     # Vérifier que les données sont bien supprimées
-#     assert test_db_session.query(Product).count() == 0
+# Fixture to create a TestClient instance for each test
+@pytest.fixture
+def client():
+    return TestClient(app)
 
-#     # Créer quelques produits de test dans la base de données de test
-#     products_to_create = [
-#         {"name": "Product 1", "description": "Description 1", "price": 49.99},
-#         {"name": "Product 2", "description": "Description 2", "price": 59.99},
-#     ]
-#     with TestClient(app) as client:
-#         for product_data in products_to_create:
-#             product_create = ProductCreate(**product_data)
-#             response = client.post("/products/", json=product_create.dict())
+# Fixture to generate a valid access token for testing purposes
+@pytest.fixture
+def test_token():
+    return create_access_token(data={"sub": "testuser"})
 
-#     # Appel à l'API pour récupérer tous les produits après la création
-#     with TestClient(app) as client:
-#         response = client.get("/products/")
+# Test cases
+def test_create_user(client):
+    response = client.post(
+        "/users/",
+        json={"username": "testuser", "password": "testpassword"},
+    )
+    assert response.status_code == 200
+    created_user = response.json()
+    assert created_user["username"] == "testuser"
+    assert "id" in created_user
 
-#         # Vérifier que la requête a réussi (code de statut 200 OK)
-#         assert response.status_code == 200
-#         products = response.json()
-#         assert len(products) == 2  # On s'attend à trouver exactement 2 produits après la création
-def test_create_product(test_db_session):
-    # Données de test pour créer un produit
-    product_data = {
-        "name": "Test Product",
-        "description": "Test description",
-        "price": 99.99
+def test_create_product(client, test_token):
+    product_data = {"name": "Test Product", "description": "Test Description", "price": 99.99}
+    headers = {"Authorization": f"Bearer {test_token}"}
+    response = client.post("/products/", json=product_data, headers=headers)
+    assert response.status_code == 201
+    created_product = response.json()
+    assert created_product["name"] == product_data["name"]
+    assert created_product["description"] == product_data["description"]
+    assert created_product["price"] == product_data["price"]
+    assert "id" in created_product
+
+def test_read_products(client, test_token):
+    headers = {"Authorization": f"Bearer {test_token}"}
+    response = client.get("/products/", headers=headers)
+    assert response.status_code == 200
+    products = response.json()
+    assert len(products) > 0
+    for product in products:
+        assert "id" in product
+        assert "name" in product
+        assert "description" in product
+        assert "price" in product
+
+def test_read_product(client, test_token):
+    # Assuming there's at least one product in the database
+    headers = {"Authorization": f"Bearer {test_token}"}
+    response = client.get("/products/", headers=headers)
+    assert response.status_code == 200
+    products = response.json()
+    assert len(products) > 0
+    product_id = products[0]["id"]
+    response = client.get(f"/products/{product_id}", headers=headers)
+    assert response.status_code == 200
+    product = response.json()
+    assert product["id"] == product_id
+
+def test_update_product(client, test_token):
+    # 1. Fetch products to get a product ID for updating
+    headers = {"Authorization": f"Bearer {test_token}"}
+    response = client.get("/products/", headers=headers)
+    assert response.status_code == 200
+    products = response.json()
+    assert len(products) > 0
+    product_id = products[0]["id"]
+
+    # 2. Prepare updated data
+    updated_data = {
+        "name": "Updated Product Name",
+        "description": "Updated Description",  # Add description field
+        "price": 19.99  # Add price field
     }
 
-    # Appel à l'API pour créer le produit
-    with TestClient(app) as client:
-        response = client.post("/products/", json=product_data)
+    # 3. Make PUT request to update the product
+    response = client.put(f"/products/{product_id}", json=updated_data, headers=headers)
 
-        # Vérifier que la création a réussi (code de statut 201 Created)
-        assert response.status_code == 201
-        created_product = response.json()
-        assert created_product["name"] == product_data["name"]
-        assert created_product["description"] == product_data["description"]
-        assert created_product["price"] == product_data["price"]
-def test_update_product(test_db_session):
-    # Créer un produit de test dans la base de données de test
-    product_data = {
-        "name": "Product to Update",
-        "description": "Old description",
-        "price": 99.99
-    }
-    with TestClient(app) as client:
-        response = client.post("/products/", json=product_data)
-        created_product = response.json()
+    # 4. Check the response status code
+    if response.status_code != 200:
+        print(response.json())  # Print the response body for debugging
+    assert response.status_code == 200, f"Expected status code 200 but got {response.status_code}"
 
-    # Données mises à jour pour le produit
-    updated_product_data = {
-        "name": "Updated Product",
-        "description": "New description",
-        "price": 119.99
-    }
+    # 5. Optionally, verify the updated product details
+    updated_product = response.json()
+    assert updated_product["id"] == product_id
+    assert updated_product["name"] == updated_data["name"]
+    assert updated_product["description"] == updated_data["description"]
+    assert updated_product["price"] == updated_data["price"]
 
-    # Appel à l'API pour mettre à jour le produit
-    with TestClient(app) as client:
-        response = client.put(f"/products/{created_product['id']}", json=updated_product_data)
 
-        # Vérifier que la mise à jour a réussi (code de statut 200 OK)
-        assert response.status_code == 200
 
-        # Vérifier que les données du produit mis à jour correspondent aux données mises à jour
-        updated_product = response.json()
-        assert updated_product["name"] == updated_product_data["name"]
-        assert updated_product["description"] == updated_product_data["description"]
-        assert updated_product["price"] == updated_product_data["price"]
-
-def test_delete_product(test_db_session):
-    # Créer un produit de test dans la base de données de test
-    product_data = {
-        "name": "Product to Delete",
-        "description": "To be deleted",
-        "price": 129.99
-    }
-    with TestClient(app) as client:
-        response = client.post("/products/", json=product_data)
-        created_product = response.json()
-
-    # Appel à l'API pour supprimer le produit par son ID
-    with TestClient(app) as client:
-        response = client.delete(f"/products/{created_product['id']}")
-
-        # Vérifier que la suppression a réussi (code de statut 200 OK)
-        assert response.status_code == 200
-        assert response.json() == {"message": "Product deleted"}
-
-if __name__ == "__main__":
-    pytest.main()
+def test_delete_product(client, test_token):
+    # Assuming there's at least one product in the database
+    headers = {"Authorization": f"Bearer {test_token}"}
+    response = client.get("/products/", headers=headers)
+    assert response.status_code == 200
+    products = response.json()
+    assert len(products) > 0
+    product_id = products[0]["id"]
+    response = client.delete(f"/products/{product_id}", headers=headers)
+    assert response.status_code == 200
+    deletion_result = response.json()
+    assert "message" in deletion_result
+    assert deletion_result["message"] == "Product deleted"
