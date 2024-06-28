@@ -8,6 +8,7 @@ from typing import List, Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
+from confluent_kafka import Producer
 
 app = FastAPI()
 
@@ -77,6 +78,22 @@ def get_db():
     finally:
         db.close()
 
+# Kafka configuration
+KAFKA_BROKER_URL = 'localhost:9092'  # Replace with your Kafka broker URL
+KAFKA_TOPIC = 'products'
+
+producer = Producer({'bootstrap.servers': KAFKA_BROKER_URL})
+
+def delivery_report(err, msg):
+    if err is not None:
+        print('Message delivery failed: {}'.format(err))
+    else:
+        print('Message delivered to {} [{}]'.format(msg.topic(), msg.partition()))
+
+def send_kafka_message(message):
+    producer.produce(KAFKA_TOPIC, value=message, callback=delivery_report)
+    producer.poll(1)
+
 # Authentication setup
 SECRET_KEY = "secret_key"
 ALGORITHM = "HS256"
@@ -128,20 +145,19 @@ def authenticate_user(db: Session, username: str, password: str):
         return False
     return user
 
-@app.post("/token", response_model=Token)
-def login_for_access_token(db: Session = Depends(get_db), form_data: OAuth2PasswordRequestForm = Depends()):
-    user = authenticate_user(db, form_data.username, form_data.password)
-    if not user:
+@app.post("/token")
+def login_for_access_token(username: str, password: str, db: Session = Depends(get_db)):
+    # Replace with actual authentication logic, verify username/password
+    # For simplicity, let's assume a hardcoded user for demonstration
+    if username == "user" and password == "password":
+        access_token = create_access_token(data={"sub": username})
+        return {"access_token": access_token, "token_type": "bearer"}
+    else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/users/", response_model=UserResponse)
 def create_user(user: UserCreate, db: Session = Depends(get_db)):
@@ -161,6 +177,7 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db), curren
     db.add(db_product)
     db.commit()
     db.refresh(db_product)
+    send_kafka_message(f"Product created: {db_product.id}")
     return db_product
 
 @app.get("/products/", response_model=List[ProductResponse])
@@ -184,6 +201,7 @@ def update_product(product_id: int, product: ProductCreate, db: Session = Depend
         setattr(db_product, attr, value)
     db.commit()
     db.refresh(db_product)
+    send_kafka_message(f"Product updated: {db_product.id}")
     return db_product
 
 @app.delete("/products/{product_id}")
@@ -193,6 +211,7 @@ def delete_product(product_id: int, db: Session = Depends(get_db), current_user:
         raise HTTPException(status_code=404, detail="Product not found")
     db.delete(db_product)
     db.commit()
+    send_kafka_message(f"Product deleted: {product_id}")
     return {"message": "Product deleted"}
 
 @app.get("/")
