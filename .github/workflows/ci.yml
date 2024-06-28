@@ -37,9 +37,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Set up SQLite database and fill with data
-        run: |
-          python fill_db.py
+      #- name: Set up SQLite database and fill with data
+        #run: |
+          #python fill_db.py
 
       - name: Run tests
         env:
